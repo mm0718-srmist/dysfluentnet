@@ -1,0 +1,21 @@
+name: dysfluentnet
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - torch>=2.1
+      - torchaudio>=2.1
+      - transformers>=4.35
+      - numpy
+      - pandas
+      - scikit-learn
+      - pyyaml
+      - tqdm
+      - jiwer
+      - matplotlib
+      - tensorboard
+      - pytest

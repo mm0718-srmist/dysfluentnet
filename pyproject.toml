@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dysfluentnet"
+version = "0.1.0"
+description = "Joint stuttering event detection and dysfluency-aware transcription via hierarchical self-supervised learning."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Mohankumar Muthu" },
+]
+dependencies = [
+  "torch>=2.1",
+  "torchaudio>=2.1",
+  "transformers>=4.35",
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "pyyaml",
+  "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "jiwer", "matplotlib", "tensorboard"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

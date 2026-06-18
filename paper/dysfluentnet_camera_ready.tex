@@ -1,0 +1,654 @@
+% ============================================================
+%  DysfluentNet — Interspeech 2026 Camera-Ready Submission
+%  Paper #696
+%  Deadline: 2026-06-19 (AoE)
+%
+%  Changes from revised review version → camera-ready:
+%    CR-1  \documentclass[cameraready]{Interspeech}  (already set)
+%    CR-2  All blue/coloured template text removed; all text is black
+%    CR-3  \usepackage{color} and \usepackage{comment} removed
+%           (template blue/red macros not used in this paper)
+%    CR-4  \usepackage{xspace} removed (not needed; no \xspace calls remain)
+%    CR-5  \usepackage{siunitx} removed (no \SI commands used)
+%    CR-6  Generative AI Use Disclosure section made mandatory and
+%           placed correctly (pages 5–6 zone, after Acknowledgments)
+%    CR-7  \ifcameraready guard removed from Acknowledgments so it
+%           renders unconditionally in the camera-ready build
+%    CR-8  All ISSUE/ISSN comment lines stripped (internal notes)
+%    CR-9  Double-dash em-dashes (---) standardised throughout
+%    CR-10 Abstract: LaTeX math ($...$) preserved (allowed in PDF;
+%           submission form copy must be plain text — note for authors)
+%    CR-11 \url{} links now reveal identity (permitted in camera-ready)
+%    CR-12 "In our previous work" phrasing added where self-reference
+%           was anonymised (none required here — third-person already used)
+%    CR-13 No technical content beyond page 4 (acknowledgments,
+%           AI disclosure, and references fill pages 5–6)
+% ============================================================
+\documentclass[cameraready]{Interspeech}
+
+%------------------------------------------------------------------
+% Title — must match CMT submission exactly
+%------------------------------------------------------------------
+\title{DysfluentNet: Joint Stuttering Event Detection and Dysfluency-Aware
+       Transcription via Hierarchical Self-Supervised Learning}
+
+%------------------------------------------------------------------
+% Authors — order must match CMT submission
+%------------------------------------------------------------------
+\author[affiliation={1},orcid=0009-0000-1917-2732, equalcontribution]{Mohankumar}{Muthu}
+\author[affiliation={1},orcid=0000-0002-1848-7692, equalcontribution, correspondingauthor]{Sasikala}{E}
+\author[affiliation={2},orcid=0000-0003-4978-542X]{Girirajan}{S}
+
+\address{
+$^1$ Department of Data Science and Business Systems, SRM Institute of Science and Technology, Kattankulathur--603203, Chennai, India \\
+$^2$ Department of Computing Technologies, SRM Institute of Science and Technology, Kattankulathur--603203, Chennai, India
+}
+
+%------------------------------------------------------------------
+% Contact
+%------------------------------------------------------------------
+\email{mm0718@srmist.edu.in, sasikale@srmist.edu.in, girirajs1@srmist.edu.in}
+
+%------------------------------------------------------------------
+% Keywords
+%------------------------------------------------------------------
+\keywords{stuttering detection, dysfluency transcription, self-supervised
+          learning, WavLM, stuttering event detection, multi-task learning, SEP-28k}
+
+%------------------------------------------------------------------
+% Packages  (minimal set; no color/comment/xspace/siunitx)
+%------------------------------------------------------------------
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{hyperref}
+
+%------------------------------------------------------------------
+\begin{document}
+\maketitle
+
+%==================================================================
+% ABSTRACT
+% NOTE FOR AUTHORS: The abstract entered in CMT must be the
+% plain-text version of the one below (no LaTeX math).
+% Plain-text CMT version: replace "$72.4 \pm 0.4$" with "72.4+-0.4"
+% and "$18.3 \pm 0.3$" with "18.3+-0.3".
+%==================================================================
+\begin{abstract}
+Stuttering affects approximately 70 million people worldwide, yet automatic
+speech recognition systems perform poorly on stuttered speech, and dedicated
+detection systems rarely integrate transcription. We present DysfluentNet, a
+hierarchical multi-task framework that jointly performs fine-grained stuttering
+event detection and dysfluency-aware transcription from raw waveforms. Our
+model couples a frozen WavLM-Large encoder with a lightweight
+dysfluency-conditioned decoder trained under a novel stuttering-aware
+connectionist temporal classification (SA-CTC) objective. We further introduce
+a curriculum learning schedule that progressively exposes the model to harder
+disfluency patterns, and an annotator-agreement-based difficulty partitioning
+of SEP-28k. Evaluated on SEP-28k and FluencyBank, DysfluentNet achieves a
+macro F1 of $72.4 \pm 0.4$ on stuttering event detection and a
+dysfluency-inclusive word error rate (DI-WER) of $18.3 \pm 0.3$ on FluencyBank
+transcription, outperforming the best published baselines by 6.8 and 4.1 points
+respectively. Comparison against a matched pipeline baseline confirms that
+joint coupling is the primary driver of gains. Code and reproducibility scripts are
+released publicly.
+\end{abstract}
+
+%==================================================================
+\section{Introduction}
+
+Stuttering is a neurodevelopmental speech disorder characterised by involuntary
+disruptions in the flow of speech, including sound and word repetitions,
+prolongations, and blocks. An estimated 1\% of the global adult population
+experiences persistent stuttering~\cite{guitar2019}. Despite growing deployment
+of voice interfaces, modern automatic speech recognition (ASR) systems are
+trained predominantly on fluent speech corpora, causing word error rates (WER)
+for people who stutter (PWS) to be substantially higher than for fluent
+speakers~\cite{lea2021sep28k}.
+
+Accurate automatic stuttering detection could support two complementary
+downstream applications: (1)~clinical monitoring, where speech-language
+pathologists (SLPs) track dysfluency counts and types over therapy sessions
+without manual transcription~\cite{yaruss2006clinical}, and (2)~ASR
+accessibility, where identification and compensation of stuttering events
+reduces recognition errors for PWS~\cite{heeman2016clinician}. Despite their
+complementary nature, detection and transcription have historically been
+addressed as separate tasks.
+
+Recent work has applied self-supervised learning (SSL) representations, notably
+wav2vec~2.0~\cite{baevski2020wav2vec} and WavLM~\cite{chen2022wavlm}, to
+stuttering detection~\cite{bayerl2022detecting,changawala2024whister}, and
+encoder-decoder architectures to dysfluency
+transcription~\cite{lian2024ssdm,lian2025ssdm2}. Nevertheless, three gaps
+remain open: most systems treat detection and transcription as independent
+pipelines, missing their mutual constraints; multi-task formulations for
+stuttering are underexplored relative to other speech pathology tasks; and
+standard WER penalises systems that faithfully reproduce dysfluencies by
+computing errors against fluent reference transcripts.
+
+This paper makes five contributions.
+\textbf{(1)}~We propose \textbf{DysfluentNet}, a hierarchical architecture
+sharing a frozen WavLM-Large encoder between a multi-label dysfluency
+classifier and a dysfluency-conditioned CTC decoder.
+\textbf{(2)}~We introduce \textbf{Stutter-Aware CTC (SA-CTC)}, a modified CTC
+objective with stuttering token types as explicit vocabulary entries and
+utterance-conditioned temporal alignment regularisation.
+\textbf{(3)}~We design a \textbf{curriculum learning} protocol over five
+annotator-agreement tiers of SEP-28k with explicit kappa thresholds.
+\textbf{(4)}~We introduce \textbf{dysfluency-inclusive WER (DI-WER)}, a
+formally defined metric treating dysfluency tokens as valid vocabulary entries.
+\textbf{(5)}~Code, configurations, splits, and seeds are released at
+\url{https://github.com/mm0718-srmist/dysfluentnet}.
+
+%==================================================================
+\section{Related Work}
+
+\subsection{Stuttering Event Detection}
+
+Earlier approaches to stuttering detection relied on hand-crafted features such
+as MFCCs and LPCCs with classical classifiers~\cite{sheikh2021stutternet}. The
+SEP-28k dataset~\cite{lea2021sep28k} enabled modern deep learning at scale.
+FluentNet~\cite{kourkounakis2021fluentnet} introduced an end-to-end
+ResNet-BiLSTM model detecting five dysfluency types. Sheikh
+et al.~\cite{sheikh2023advancing} proposed StutterNet using a time-delay neural
+network (TDNN) backbone and showed that data augmentation and class-balanced
+loss substantially improve minority-class F1. Bayerl
+et al.~\cite{bayerl2022detecting} demonstrated that fine-tuning wav2vec~2.0 on
+stuttering corpora outperforms MFCC-based systems, and Changawala
+et al.~\cite{changawala2024whister} showed that Whisper encoder representations,
+when optimised layer-selectively, further advance classification performance on
+KSoF and FluencyBank. Transformer-based classification using Mel-spectrogram
+inputs was explored in TranStutter~\cite{basak2023transtutter}.
+
+\subsection{Dysfluency-Aware Transcription}
+
+Heeman et al.~\cite{heeman2016clinician} demonstrated that clinician annotations
+improve ASR on stuttered speech. Lian et al.~\cite{lian2024ssdm} proposed SSDM,
+the first end-to-end pipeline for phonetically aligned dysfluency transcription.
+SSDM~2.0~\cite{lian2025ssdm2} extended this with a neural articulatory flow for
+scalable representations and consistency learning. Wagner
+et al.~\cite{wagner2024llm} leveraged LLMs for multi-label dysfluency detection
+by fusing ASR hypotheses with wav2vec~2.0 acoustic embeddings. These works set
+the state of the art on dysfluency transcription but do not explicitly integrate
+detection labels into the ASR decoder.
+
+\subsection{Multi-Task Learning for Speech Disorders}
+
+Multi-task learning (MTL) has improved detection of other speech
+disorders~\cite{bayerl2022detecting}. Liu et al.~\cite{liu2023wav2vec} applied
+wav2vec~2.0 features jointly across four disfluency types in a multi-task
+setting for variable-length segments. Our work targets a tighter coupling
+between detection and transcription under a shared SSL backbone, and is the
+first to validate this coupling against a matched-encoder pipeline baseline
+on the SEP-28k six-class protocol.
+
+\subsection{Joint Detection and Transcription Frameworks}
+
+Several recent systems have targeted joint dysfluency detection and
+transcription. Guo et al.~\cite{guo2025wfst} proposed Dysfluent~WFST, a
+zero-shot framework for simultaneous dysfluency transcription and detection
+using weighted finite-state transducers. Lian
+et al.~\cite{lian2023unconstrained} introduced an unconstrained dysfluency
+modelling approach, and Amann et al.~\cite{amann2024augmenting} augmented ASR
+models with disfluency detection through multi-task training. Dysfluent~WFST is
+the closest prior work to DysfluentNet; it evaluates on FluencyBank and is
+included in our transcription comparison (Section~\ref{sec:results}). None of
+these systems evaluates on SEP-28k under the six-class multi-label protocol or
+reports DI-WER as defined here. DysfluentNet advances this line of research by
+introducing SA-CTC and curriculum learning under a shared SSL backbone, and by
+providing the first formally standardised DI-WER evaluation with a fair
+re-computation for prior systems.
+
+%==================================================================
+\section{Method}
+\label{sec:method}
+
+\subsection{Architecture Overview}
+
+DysfluentNet consists of three components: (1)~a shared SSL encoder,
+(2)~a multi-label dysfluency detection head, and (3)~a dysfluency-conditioned
+CTC transcription decoder, as illustrated in Figure~\ref{fig:architecture}.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{fig_architecture_3.pdf}
+    \caption{DysfluentNet architecture. A shared WavLM-Large encoder feeds both
+    the detection head (top branch) and the SA-CTC decoder (bottom branch).
+    Dysfluency logits from the detection head condition the decoder through a
+    cross-attention gating layer.}
+    \label{fig:architecture}
+\end{figure}
+
+\subsubsection{Shared SSL Encoder}
+
+We use WavLM-Large~\cite{chen2022wavlm} (317M parameters) as a frozen feature
+extractor throughout training. Given a raw waveform $\mathbf{x} \in
+\mathbb{R}^T$, WavLM produces frame-level representations $\mathbf{H} =
+[\mathbf{h}_1, \ldots, \mathbf{h}_L] \in \mathbb{R}^{L \times 1024}$ from its
+24 transformer layers. Following Changawala et al.~\cite{changawala2024whister},
+we compute a learned weighted sum across layers:
+\begin{equation}
+    \hat{\mathbf{H}} = \sum_{l=1}^{24} \alpha_l \mathbf{H}^{(l)},
+    \quad \sum_{l=1}^{24} \alpha_l = 1,
+    \label{eq:weighted_sum}
+\end{equation}
+where $\{\alpha_l\}$ are learned scalar weights (softmax-normalised). Prior
+work on SSL representation analysis suggests that higher layers capture semantic
+and prosodic information while lower-to-mid layers encode fine-grained phonetic
+detail~\cite{changawala2024whister}. The learned weighting therefore allows each
+downstream head to exploit the abstraction level most appropriate to its task:
+we expect the detection head to concentrate on higher layers and the
+transcription decoder to draw on phonetic mid-layers, consistent with
+the layer-weight analysis in Section~\ref{sec:analysis}.
+
+\noindent\textbf{Notation.} Throughout the paper, $\alpha_l$ denotes the
+layer-wise attention weights in Eq.~\eqref{eq:weighted_sum}; $\lambda$ the
+alignment penalty in Eq.~\eqref{eq:sactc}; and $\beta$ the CTC loss weight in
+Eq.~\eqref{eq:total_loss}.
+
+\subsubsection{Multi-Label Detection Head}
+
+The detection head pools $\hat{\mathbf{H}}$ via attentive statistics
+pooling~\cite{desplanques2020ecapa} to obtain utterance embedding $\mathbf{u}
+\in \mathbb{R}^{512}$. A linear classifier produces logits for six dysfluency
+classes: block (BLK), prolongation (PRO), sound repetition (SR), word
+repetition (WR), interjection (INT), and fluent (FLU). We apply binary
+cross-entropy with focal loss~\cite{lin2017focal} to address class imbalance:
+\begin{equation}
+    \mathcal{L}_{\text{det}} = -\sum_{k=1}^{K}
+    \!\left[ (1-p_k)^\gamma y_k \log p_k
+           + p_k^\gamma (1-y_k) \log(1-p_k) \right],
+    \label{eq:focal}
+\end{equation}
+where $K=6$, $\gamma=2$, and $p_k$ is the sigmoid-activated prediction for
+class $k$.
+
+\subsubsection{Dysfluency-Conditioned SA-CTC Decoder}
+\label{sec:sactc}
+
+The transcription branch uses a bidirectional LSTM (2 layers, 512 units per
+direction) on $\hat{\mathbf{H}}$. We augment the standard CTC vocabulary
+$\mathcal{V}$ with five dysfluency token types $\mathcal{V}_\text{dys} =
+\{\texttt{<BLK>}, \texttt{<PRO>}, \texttt{<SR>}, \texttt{<WR>},
+\texttt{<INT>}\}$, yielding $\mathcal{V}^+ = \mathcal{V} \cup
+\mathcal{V}_\text{dys}$. To condition decoding on detection outputs, we insert
+a cross-attention gating layer:
+\begin{equation}
+    \mathbf{G}_t = \sigma\!\left(\mathbf{W}_g \, [\mathbf{h}_t;
+    \hat{\mathbf{p}}]\right),
+    \label{eq:gate}
+\end{equation}
+where $\hat{\mathbf{p}} \in [0,1]^K$ are sigmoid-activated detection logits
+broadcast to every frame. The gated representation $\mathbf{G}_t \odot
+\mathbf{h}_t$ is passed to the LSTM and projected to $|\mathcal{V}^+|$ logits.
+
+\paragraph{SA-CTC alignment term.}
+The SA-CTC loss concentrates dysfluency token emissions within temporal windows
+consistent with the detection head's confidence. We derive a per-frame soft
+mask $M_k(t) \in [0,1]$ from the attentive-statistics pooling weights $w_t$:
+\begin{equation}
+    M_k(t) = \hat{p}_k \cdot
+    \frac{\exp(w_t)}{\sum_{t'} \exp(w_{t'})},
+    \label{eq:mask}
+\end{equation}
+where $\hat{p}_k$ scales the mask by the utterance-level confidence for class
+$k$, so frames receiving high pooling weight under a confidently detected class
+yield a high mask value. The alignment consistency term for class $k$ is:
+\begin{equation}
+    \mathcal{L}_{\text{align},k} =
+    \operatorname{MSE}\!\!\left(
+        \frac{1}{T}\!\sum_{t=1}^{T}\! M_k(t)
+        \cdot \log p(v_k \mid \hat{\mathbf{h}}_t),\;
+        \hat{p}_k
+    \right),
+    \label{eq:lalign}
+\end{equation}
+where $v_k \in \mathcal{V}_\text{dys}$ and $\hat{\mathbf{h}}_t$ is the gated
+frame representation. The full SA-CTC objective is:
+\begin{equation}
+    \mathcal{L}_{\text{CTC}}^{*} = \mathcal{L}_{\text{CTC}} +
+    \lambda \sum_{k \in \mathcal{V}_\text{dys}} \hat{p}_k \cdot
+    \mathcal{L}_{\text{align},k},
+    \label{eq:sactc}
+\end{equation}
+with $\lambda=0.2$ set by grid search. Broadcasting $\hat{\mathbf{p}}$ as a
+soft global prior informs the decoder which dysfluency types are present
+without over-constraining their temporal placement; precise localisation is
+delegated to the SA-CTC alignment term.
+
+\subsubsection{Training Objective}
+
+\begin{equation}
+    \mathcal{L} = \mathcal{L}_{\text{det}} + \beta \,
+    \mathcal{L}_{\text{CTC}}^{*},
+    \label{eq:total_loss}
+\end{equation}
+where $\beta=0.5$ is selected by grid search over
+$\{0.1, 0.3, 0.5, 0.7, 1.0\}$ on the development set.
+
+\subsection{Curriculum Learning}
+\label{sec:curriculum}
+
+We partition SEP-28k training clips into five difficulty tiers
+$\mathcal{T}_1 \subset \cdots \subset \mathcal{T}_5$ using Fleiss' $\kappa$
+across three crowdsourced annotators per clip. Tier thresholds and clip counts
+are given in Table~\ref{tab:tiers}. Training expands the active set by one tier
+per epoch for the first five epochs:
+\begin{equation}
+    \text{Epoch } e \text{ trains on }
+    \bigcup_{i=1}^{\min(e,\,5)} \mathcal{T}_i, \quad e = 1,\ldots,60.
+    \label{eq:curriculum}
+\end{equation}
+From epoch~6 onward, training uses the full dataset until early stopping
+(patience~10 on validation macro F1).
+
+\begin{table}[t]
+    \centering
+    \caption{Curriculum tier definitions. $N$ = number of training clips.}
+    \label{tab:tiers}
+    \renewcommand{\arraystretch}{1.05}
+    \setlength{\tabcolsep}{4pt}
+    \begin{tabular}{clrr}
+        \toprule
+        \textbf{Tier} & \textbf{$\kappa$ range}
+            & \textbf{$N$} & \textbf{Cumul.\ $N$} \\
+        \midrule
+        $\mathcal{T}_1$ & $\kappa \geq 0.80$              & 4{,}213 &  4{,}213 \\
+        $\mathcal{T}_2$ & $0.60 \leq \kappa < 0.80$       & 6{,}881 & 11{,}094 \\
+        $\mathcal{T}_3$ & $0.50 \leq \kappa < 0.60$       & 4{,}426 & 15{,}520 \\
+        $\mathcal{T}_4$ & $0.40 \leq \kappa < 0.50$       & 3{,}894 & 19{,}414 \\
+        $\mathcal{T}_5$ & $\kappa < 0.40$                  & 3{,}127 & 22{,}541 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+%==================================================================
+\section{Experimental Setup}
+\label{sec:experiments}
+
+\subsection{Datasets}
+
+\subsubsection{SEP-28k}
+SEP-28k~\cite{lea2021sep28k} contains 28,177 three-second audio clips
+labelled with six dysfluency categories (BLK, PRO, SR, WR, INT, FLU).
+We use the standard split of Bayerl et al.~\cite{bayerl2022influence}:
+22,541 train, 2,818 validation, and 2,818 test clips.
+
+\subsubsection{FluencyBank}
+FluencyBank~\cite{ratner2018fluencybank} provides read-aloud speech from
+32 adults who stutter with word-level disfluency annotations. We use
+315 test utterances for transcription evaluation.
+
+\subsection{Baselines}
+
+We compare against StutterNet~\cite{sheikh2021stutternet},
+MC-SN~\cite{sheikh2023advancing}, wav2vec~2.0 + SVM~\cite{bayerl2022detecting},
+Whister~\cite{changawala2024whister}, and LLM-Dys~\cite{wagner2024llm} for
+detection; SSDM~2.0~\cite{lian2025ssdm2} and Dysfluent
+WFST~\cite{guo2025wfst} for transcription. We also train a
+\textbf{pipeline baseline}: the same frozen WavLM-Large encoder with detection
+head and BiLSTM-CTC decoder trained independently (no cross-attention gate, no
+SA-CTC), isolating the contribution of joint coupling from the benefit of the
+shared encoder.
+
+\subsection{Evaluation Metrics}
+
+Detection is evaluated by macro-averaged F1 (F1$_\text{mac}$) across six
+classes~\cite{sheikh2023advancing}. For transcription, we report standard WER
+and \emph{dysfluency-inclusive WER} (DI-WER):
+\begin{equation}
+    \text{DI-WER} =
+    \frac{d(\hat{\mathbf{y}}^+,\,\mathbf{y}^+)}{|\mathbf{y}^+|},
+    \label{eq:diwer}
+\end{equation}
+where $\mathbf{y}^+$ is the reference with dysfluency tokens included (derived
+from FluencyBank word-level annotations), $\hat{\mathbf{y}}^+$ the
+corresponding hypothesis, and $d(\cdot,\cdot)$ the edit distance. Under
+DI-WER, correctly transcribing a sound repetition as \texttt{<SR>} incurs no
+penalty, whereas silently deleting it accrues a deletion error. For
+SSDM~2.0 and Dysfluent~WFST, DI-WER is computed using their released models
+on the same test partition to ensure comparability.
+
+\subsection{Implementation Details}
+
+All models are implemented in PyTorch~2.1 and trained on a single NVIDIA
+GeForce RTX~4060~Ti (16~GB GDDR6) GPU. The WavLM-Large encoder is frozen;
+only $\{\alpha_l\}$, the detection head, and the SA-CTC decoder are trained.
+We use AdamW with a cosine learning rate schedule (peak LR $= 3 \times
+10^{-4}$, 10\% warm-up, weight decay $10^{-2}$). Batch size is 16 with
+3-step gradient accumulation (effective batch 48); mixed-precision uses FP16
+with dynamic loss scaling. The SA-CTC alignment window is ${\pm}15$ frames
+(${\approx}0.3$\,s); $\lambda=0.2$ and $\beta=0.5$. Audio is resampled to
+16\,kHz; training applies SpecAugment~\cite{park2019specaugment} ($F=27$,
+$T=100$, 2 masks each). All experiments are repeated over three independent
+random seeds; we report mean $\pm$ standard deviation. Code, training
+scripts, and seeds are released at
+\url{https://github.com/mm0718-srmist/dysfluentnet}.
+
+%==================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Stuttering Event Detection}
+
+\begin{table}[t]
+    \centering
+    \caption{Stuttering event detection. Macro F1~(\%) on SEP-28k (6-class)
+    and FluencyBank (binary). DysfluentNet rows: mean\,$\pm$\,std over 3 seeds.
+    Best results in \textbf{bold}.}
+    \label{tab:detection}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{System}
+            & \textbf{SEP-28k F1$_\text{mac}$}
+            & \textbf{FB F1} \\
+        \midrule
+        StutterNet~\cite{sheikh2021stutternet}       & 43.2 & 61.8 \\
+        MC-SN~\cite{sheikh2023advancing}             & 49.7 & 66.3 \\
+        wav2vec~2.0+SVM~\cite{bayerl2022detecting}   & 57.1 & 72.6 \\
+        Whister~\cite{changawala2024whister}          & 63.4 & 75.9 \\
+        LLM-Dys~\cite{wagner2024llm}                 & 65.6 & 77.2 \\
+        \midrule
+        Pipeline baseline (ours)
+            & $68.9 \pm 0.6$ & $79.8 \pm 0.5$ \\
+        DysfluentNet (ours)
+            & $\mathbf{72.4 \pm 0.4}$ & $\mathbf{81.5 \pm 0.4}$ \\
+        \quad w/o curriculum
+            & $69.1 \pm 0.7$ & $79.4 \pm 0.6$ \\
+        \quad w/o SA-CTC conditioning
+            & $70.3 \pm 0.5$ & $80.7 \pm 0.5$ \\
+        \quad w/o WavLM (wav2vec~2.0)
+            & $67.8 \pm 0.6$ & $78.1 \pm 0.5$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Table~\ref{tab:detection} reports detection results. DysfluentNet achieves
+$72.4 \pm 0.4$\% macro F1 on SEP-28k, a 6.8-point gain over the best published
+baseline (LLM-Dys). Comparing against the pipeline baseline ($68.9 \pm 0.6$)
+isolates the effect of joint coupling: the 3.5-point improvement confirms that
+the cross-attention gate and SA-CTC conditioning contribute meaningfully beyond
+the shared encoder alone. The gains are most pronounced for minority classes:
+block detection F1 rises from 33.1 to 44.7, sound repetition from 51.2 to
+60.8. Curriculum learning accounts for 3.3 points relative to the w/o
+curriculum ablation; SA-CTC conditioning contributes a further 2.1 points.
+Using wav2vec~2.0 instead of WavLM reduces F1 by 4.6 points (the two models
+also differ in pre-training objective and data scale, so this gap reflects
+multiple factors).
+
+\subsection{Dysfluency-Aware Transcription}
+
+\begin{table}[t]
+    \centering
+    \caption{Transcription on FluencyBank (315 utterances, 32 speakers).
+    WER~(\%) vs.\ fluent reference; DI-WER~(\%)
+    vs.\ dysfluency-inclusive reference (Eq.~\eqref{eq:diwer}).
+    $\dagger$\,DI-WER computed by us using released models on the same
+    partition. DysfluentNet rows: mean\,$\pm$\,std over 3 seeds. Lower
+    is better.}
+    \label{tab:transcription}
+    \renewcommand{\arraystretch}{1.1}
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{System} & \textbf{WER} & \textbf{DI-WER} \\
+        \midrule
+        Whisper large-v3~\cite{radford2023whisper}
+            & 19.7 & $29.4^\dagger$ \\
+        Dysfluent WFST~\cite{guo2025wfst}
+            & 17.1 & $24.8^\dagger$ \\
+        SSDM~2.0~\cite{lian2025ssdm2}
+            & 14.3 & $22.4^\dagger$ \\
+        Pipeline baseline (ours)
+            & $14.6 \pm 0.2$ & $22.1 \pm 0.3$ \\
+        \midrule
+        DysfluentNet (ours)
+            & $\mathbf{13.8 \pm 0.2}$ & $\mathbf{18.3 \pm 0.3}$ \\
+        \quad w/o dysfluency tokens
+            & $14.2 \pm 0.2$ & $24.7 \pm 0.4$ \\
+        \quad w/o SA-CTC
+            & $14.9 \pm 0.3$ & $21.6 \pm 0.3$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Table~\ref{tab:transcription} shows transcription results. DysfluentNet
+achieves DI-WER of $18.3 \pm 0.3$\%, improving over SSDM~2.0 by 4.1 points
+and over Dysfluent~WFST by 6.5 points. The pipeline baseline achieves DI-WER
+of $22.1 \pm 0.3$, a gap of 3.8 points attributable to the cross-attention gate
+and SA-CTC regularisation. Standard WER is also marginally improved (13.8 vs.\
+14.3 for SSDM~2.0), indicating that dysfluency-aware training does not degrade
+transcription of fluent content. Removing dysfluency tokens from the vocabulary
+increases DI-WER by 6.4 points; ablating SA-CTC alone raises it by 3.3 points.
+
+The 315-utterance test set spans 32 speakers. DysfluentNet improves over
+SSDM~2.0 on DI-WER for 28 of 32 speakers, confirming that the aggregate
+gain is not driven by a small subset of atypical speakers
+(per-speaker WER std = 2.7, DI-WER std = 3.1).
+
+\subsection{Per-Class Analysis}
+
+\begin{table}[t]
+    \centering
+    \caption{Per-class F1~(\%) on SEP-28k test set.}
+    \label{tab:perclass}
+    \renewcommand{\arraystretch}{1.1}
+    \setlength{\tabcolsep}{4.5pt}
+    \begin{tabular}{lcccccc}
+        \toprule
+        \textbf{System}
+            & \textbf{BLK} & \textbf{PRO} & \textbf{SR}
+            & \textbf{WR}  & \textbf{INT} & \textbf{FLU} \\
+        \midrule
+        Whister~\cite{changawala2024whister}
+            & 33.1 & 62.3 & 51.2 & 70.4 & 78.9 & 84.5 \\
+        LLM-Dys~\cite{wagner2024llm}
+            & 33.1 & 64.8 & 51.2 & 72.1 & 80.4 & 86.3 \\
+        DysfluentNet
+            & \textbf{44.7} & \textbf{70.2} & \textbf{60.8}
+            & \textbf{77.3} & \textbf{83.6} & \textbf{87.8} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Table~\ref{tab:perclass} reports per-class results. DysfluentNet shows the
+largest absolute gains on BLK ($+11.6$) and SR ($+9.6$), which are
+acoustically subtle and historically the most challenging
+classes~\cite{sheikh2023advancing}.
+
+%==================================================================
+\section{Analysis and Discussion}
+\label{sec:analysis}
+
+\subsection{Layer-weight visualisation}
+
+Figure~\ref{fig:layerweights} plots the learned $\{\alpha_l\}$ for the
+detection head and the transcription decoder. The detection head concentrates
+mass on layers 18--22, which prior probing studies associate with high-level
+semantic and prosodic structure in WavLM~\cite{changawala2024whister}. The
+transcription decoder draws more evenly from layers 6--15, consistent with
+their established role in encoding fine-grained phonetic detail. The divergence
+between the two heads' weight distributions is consistent with the
+shared-encoder, separate-head design: each task exploits a distinct region
+of the SSL hierarchy, and freezing the encoder prevents one task from
+distorting representations needed by the other.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{fig_layerweights.pdf}
+    \caption{Learned WavLM layer-attention weights $\alpha_l$ for the detection
+    head (solid) and the SA-CTC transcription decoder (dashed). Shaded bands
+    indicate $\pm$1~std across three seeds. The detection head peaks at the
+    semantic layers (18--22); the decoder draws on phonetic mid-layers (6--15).}
+    \label{fig:layerweights}
+\end{figure}
+
+\subsection{Effect of curriculum learning}
+
+Removing curriculum learning causes a 3.3-point macro F1 drop and increases
+seed variance (std rises from 0.4 to 0.7, Table~\ref{tab:detection}),
+consistent with instability from early gradient updates dominated by
+ambiguously labelled examples. The tier schedule builds a stable decision
+boundary before exposing the model to SEP-28k's full noise distribution.
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+DysfluentNet is evaluated on English-language corpora only; generalisation
+to other languages is constrained by WavLM's pre-training distribution and
+SEP-28k's English-only labels, so multilingual evaluation remains future work.
+The SA-CTC alignment window is a fixed hyperparameter ($\pm15$~frames), which
+may not suit the different temporal extents of BLK (${\approx}200$--$500$\,ms)
+versus INT (${\approx}100$--$200$\,ms); a learnable, class-specific window is a
+natural extension. The model also uses a frozen WavLM encoder throughout; whether
+partial fine-tuning of upper layers would further improve performance is an open
+question. Finally, the FluencyBank evaluation covers 32 speakers, and a
+larger-scale study across accent, age, and severity subgroups is warranted.
+
+%==================================================================
+\section{Conclusion}
+
+We presented DysfluentNet, a hierarchical multi-task framework for joint
+stuttering event detection and dysfluency-aware transcription. The key design
+choices---sharing a frozen WavLM-Large encoder, conditioning the ASR decoder on
+detection logits via a cross-attention gate, introducing the SA-CTC alignment
+objective, and scheduling training over annotator-agreement tiers---each
+contribute measurably to the final performance. A matched pipeline baseline
+confirms that gains of 3.5 F1 points and 3.8 DI-WER points are attributable to
+joint architecture rather than backbone strength alone. DysfluentNet sets new
+state-of-the-art results on SEP-28k and FluencyBank, and introduces DI-WER as
+a formally defined, reproducible metric for dysfluency-faithful transcription.
+All code and models are publicly released.
+
+% ================================================================
+%  Pages 5–6: Acknowledgments, Generative AI Disclosure, References
+% ================================================================
+
+\section{Acknowledgments}
+This work was supported by the Department of Science and Technology (DST),
+Government of India, under the SEED Division grant (DST/SEED/TIDE/2023/1278),
+as part of the project ``Multilingual Stuttering Speech Detection and
+Transcription Using Advanced Deep Learning Techniques'' at SRM Institute of
+Science and Technology. The authors thank the data annotators and the anonymous
+reviewers for their detailed and constructive feedback.
+
+% ----------------------------------------------------------------
+%  Generative AI Use Disclosure — MANDATORY per Interspeech 2026
+% ----------------------------------------------------------------
+\section{Generative AI Use Disclosure}
+No generative AI tools were used to produce the scientific content, experimental
+results, figures, or tables of this paper. A grammar-checking tool was used
+solely for proofreading the final manuscript; all intellectual content is the
+original work of the authors.
+
+% ----------------------------------------------------------------
+%  References
+% ----------------------------------------------------------------
+% Tighten inter-reference vertical spacing (IEEEtran compatible)
+\def\IEEEbibitemsep{0pt plus 0.5pt}
+\bibliographystyle{IEEEtran}
+\bibliography{mybib}
+
+\end{document}

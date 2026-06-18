@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the DysfluentNet paper."
+title: "DysfluentNet: Joint Stuttering Event Detection and Dysfluency-Aware Transcription via Hierarchical Self-Supervised Learning"
+authors:
+  - given-names: "Mohankumar"
+    family-names: "Muthu"
+    orcid: "https://orcid.org/0009-0000-1917-2732"
+    affiliation: "Department of Data Science and Business Systems, SRM Institute of Science and Technology"
+  - given-names: "Sasikala"
+    family-names: "E"
+    orcid: "https://orcid.org/0000-0002-1848-7692"
+    affiliation: "Department of Data Science and Business Systems, SRM Institute of Science and Technology"
+  - given-names: "Girirajan"
+    family-names: "S"
+    orcid: "https://orcid.org/0000-0003-4978-542X"
+    affiliation: "Department of Computing Technologies, SRM Institute of Science and Technology"
+date-released: 2026-06-19
+license: MIT
+repository-code: "https://github.com/mm0718-srmist/dysfluentnet"
+preferred-citation:
+  type: conference-paper
+  title: "DysfluentNet: Joint Stuttering Event Detection and Dysfluency-Aware Transcription via Hierarchical Self-Supervised Learning"
+  authors:
+    - given-names: "Mohankumar"
+      family-names: "Muthu"
+    - given-names: "Sasikala"
+      family-names: "E"
+    - given-names: "Girirajan"
+      family-names: "S"
+  conference:
+    name: "Interspeech 2026"
+  year: 2026

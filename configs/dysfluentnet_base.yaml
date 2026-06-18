@@ -1,0 +1,81 @@
+# DysfluentNet base configuration.
+# All values below are taken directly from the paper's
+# "Implementation Details" (Sec. 4.4) and equation definitions, so that
+# `train.py --config configs/dysfluentnet_base.yaml` reproduces the
+# reported setup as closely as the released manifests allow.
+
+experiment:
+  name: dysfluentnet_base
+  seeds: [0, 1, 2]            # paper reports mean +- std over 3 seeds
+  output_dir: runs/dysfluentnet_base
+
+data:
+  sep28k_train_manifest: data/manifests/sep28k_train.csv
+  sep28k_val_manifest: data/manifests/sep28k_val.csv
+  sep28k_test_manifest: data/manifests/sep28k_test.csv
+  fluencybank_test_manifest: data/manifests/fluencybank_test.csv
+  sample_rate: 16000
+
+  # Curriculum tier thresholds (Sec. 4.2, Table: curriculum tier definitions)
+  curriculum:
+    enabled: true
+    tier_boundaries:
+      T1: {kappa_min: 0.80, kappa_max: null}
+      T2: {kappa_min: 0.60, kappa_max: 0.80}
+      T3: {kappa_min: 0.50, kappa_max: 0.60}
+      T4: {kappa_min: 0.40, kappa_max: 0.50}
+      T5: {kappa_min: null, kappa_max: 0.40}
+    expand_one_tier_per_epoch_until: 5   # epoch 6 onward: full dataset
+
+  spec_augment:
+    enabled: true
+    freq_mask_param: 27   # F
+    time_mask_param: 100  # T
+    num_freq_masks: 2
+    num_time_masks: 2
+
+model:
+  wavlm_model_name: microsoft/wavlm-large
+  num_layers: 24
+  encoder_dim: 1024
+  freeze_encoder: true
+  detection:
+    embed_dim: 512
+    num_classes: 6          # BLK, PRO, SR, WR, INT, FLU
+  decoder:
+    lstm_hidden: 512
+    num_lstm_layers: 2
+    bidirectional: true
+    base_vocab_size: 32     # placeholder grapheme/BPE vocab size; set to
+                             # match your tokenizer before training
+    dysfluency_tokens: ["<BLK>", "<PRO>", "<SR>", "<WR>", "<INT>"]
+
+loss:
+  focal_gamma: 2.0           # Eq. 2
+  sa_ctc:
+    lambda_align: 0.2        # Eq. 6, grid-searched over a small set
+    window_frames: 15        # +-15 frames (~0.3s), Sec. 4.4 / Sec. 6
+  beta: 0.5                  # Eq. 7 total-loss weighting, grid-searched
+                              # over {0.1, 0.3, 0.5, 0.7, 1.0}
+
+optim:
+  name: adamw
+  peak_lr: 3.0e-4
+  warmup_ratio: 0.10
+  weight_decay: 1.0e-2
+  schedule: cosine
+
+train:
+  batch_size: 16
+  grad_accum_steps: 3        # effective batch size = 48
+  precision: fp16            # mixed precision with dynamic loss scaling
+  max_epochs: 60
+  early_stopping:
+    metric: val_macro_f1
+    mode: max
+    patience: 10
+  device: cuda                # paper used a single RTX 4060 Ti (16 GB)
+
+eval:
+  detection_metric: macro_f1
+  transcription_metrics: [wer, di_wer]
