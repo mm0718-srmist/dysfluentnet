@@ -38,3 +38,5 @@ paper/*.fls
 .DS_Store
 .idea/
 .vscode/
+
+paper/dysfluentnet_camera_ready.tex
